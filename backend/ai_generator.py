@@ -1,15 +1,16 @@
-import anthropic
+from openai import OpenAI
 from typing import List, Optional, Dict, Any
 
 class AIGenerator:
-    """Handles interactions with Anthropic's Claude API for generating responses"""
+    """Handles interactions with ModelScope's Qwen API for generating responses"""
     
     # Static system prompt to avoid rebuilding on each call
-    SYSTEM_PROMPT = """ You are an AI assistant specialized in course materials and educational content with access to a comprehensive search tool for course information.
+    SYSTEM_PROMPT = """ You are an AI assistant specialized in course materials and educational content with access to comprehensive search tools for course information.
 
 Search Tool Usage:
-- Use the search tool **only** for questions about specific course content or detailed educational materials
-- **One search per query maximum**
+- Use the search_course_content tool for questions about specific course content or detailed educational materials
+- Use the get_course_outline tool for questions about course structure, titles, links, and lesson lists
+- **You may use up to two tools in sequence when needed to fully answer a question**
 - Synthesize search results into accurate, fact-based responses
 - If search yields no results, state this clearly without offering alternatives
 
@@ -30,7 +31,10 @@ Provide only the direct answer to what was asked.
 """
     
     def __init__(self, api_key: str, model: str):
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = OpenAI(
+            base_url='https://api-inference.modelscope.cn/v1',
+            api_key=api_key,
+        )
         self.model = model
         
         # Pre-build base API parameters
@@ -46,6 +50,7 @@ Provide only the direct answer to what was asked.
                          tool_manager=None) -> str:
         """
         Generate AI response with optional tool usage and conversation context.
+        Supports sequential tool calling with up to 2 rounds.
         
         Args:
             query: The user's question or request
@@ -64,72 +69,125 @@ Provide only the direct answer to what was asked.
             else self.SYSTEM_PROMPT
         )
         
-        # Prepare API call parameters efficiently
+        # Prepare initial messages
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": query}
+        ]
+        
+        # Add tools if available (ModelScope Qwen supports tools)
         api_params = {
             **self.base_params,
-            "messages": [{"role": "user", "content": query}],
-            "system": system_content
+            "messages": messages
         }
         
-        # Add tools if available
         if tools:
-            api_params["tools"] = tools
-            api_params["tool_choice"] = {"type": "auto"}
+            # Convert tools to OpenAI format
+            openai_tools = []
+            for tool in tools:
+                openai_tool = {
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": tool["description"],
+                        "parameters": tool["input_schema"]
+                    }
+                }
+                openai_tools.append(openai_tool)
+            api_params["tools"] = openai_tools
+            api_params["tool_choice"] = "auto"
         
-        # Get response from Claude
-        response = self.client.messages.create(**api_params)
-        
-        # Handle tool execution if needed
-        if response.stop_reason == "tool_use" and tool_manager:
-            return self._handle_tool_execution(response, api_params, tool_manager)
-        
-        # Return direct response
-        return response.content[0].text
+        try:
+            # Handle sequential tool execution with up to 2 rounds
+            if tools and tool_manager:
+                return self._handle_sequential_tool_execution(api_params, tool_manager)
+            
+            # Get direct response if no tools or tool manager
+            response = self.client.chat.completions.create(**api_params)
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            # Return a more descriptive error message
+            return f"Query failed: {str(e)}"
     
-    def _handle_tool_execution(self, initial_response, base_params: Dict[str, Any], tool_manager):
+    def _handle_sequential_tool_execution(self, initial_params: Dict[str, Any], tool_manager):
         """
-        Handle execution of tool calls and get follow-up response.
+        Handle sequential tool execution with up to 2 rounds of tool calls.
         
         Args:
-            initial_response: The response containing tool use requests
-            base_params: Base API parameters
+            initial_params: Initial API parameters
             tool_manager: Manager to execute tools
             
         Returns:
-            Final response text after tool execution
+            Final response text after all tool execution
         """
-        # Start with existing messages
-        messages = base_params["messages"].copy()
+        messages = initial_params["messages"].copy()
+        tools = initial_params.get("tools", [])
         
-        # Add AI's tool use response
-        messages.append({"role": "assistant", "content": initial_response.content})
+        # Keep track of rounds to limit to 2
+        round_count = 0
+        max_rounds = 2
         
-        # Execute all tool calls and collect results
-        tool_results = []
-        for content_block in initial_response.content:
-            if content_block.type == "tool_use":
-                tool_result = tool_manager.execute_tool(
-                    content_block.name, 
-                    **content_block.input
-                )
+        try:
+            while round_count < max_rounds:
+                # Prepare API call with current messages and tools
+                api_params = {
+                    **self.base_params,
+                    "messages": messages,
+                    "tools": tools,
+                    "tool_choice": "auto"
+                }
                 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": content_block.id,
-                    "content": tool_result
-                })
-        
-        # Add tool results as single message
-        if tool_results:
-            messages.append({"role": "user", "content": tool_results})
-        
-        # Prepare final API call without tools
-        final_params = {
-            **self.base_params,
-            "messages": messages,
-            "system": base_params["system"]
-        }
-        
-        # Get final response
-        final_response = self.client.messages.create(**final_params)
-        return final_response.content[0].text
+                # Get response from AI
+                response = self.client.chat.completions.create(**api_params)
+                choice = response.choices[0]
+                
+                # Check if we have tool calls
+                if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+                    # Add AI's response to messages
+                    messages.append(choice.message)
+                    
+                    # Execute all tool calls and collect results
+                    tool_results = []
+                    for tool_call in choice.message.tool_calls:
+                        try:
+                            # Execute tool with provided arguments
+                            tool_result = tool_manager.execute_tool(
+                                tool_call.function.name, 
+                                **eval(tool_call.function.arguments)  # Convert string arguments to dict
+                            )
+                            
+                            tool_results.append({
+                                "tool_call_id": tool_call.id,
+                                "role": "tool",
+                                "name": tool_call.function.name,
+                                "content": tool_result
+                            })
+                        except Exception as e:
+                            # If a tool fails, return error message
+                            return f"Tool execution failed: {str(e)}"
+                    
+                    # Add all tool results to messages
+                    messages.extend(tool_results)
+                    
+                    # Increment round counter
+                    round_count += 1
+                    
+                    # Continue to next round
+                    continue
+                else:
+                    # No more tool calls, return final response
+                    return choice.message.content
+            
+            # If we've reached max rounds, make one final call without tools
+            final_params = {
+                **self.base_params,
+                "messages": messages
+            }
+            
+            final_response = self.client.chat.completions.create(**final_params)
+            return final_response.choices[0].message.content
+            
+        except Exception as e:
+            # Return a more descriptive error message
+            return f"Sequential tool execution failed: {str(e)}"
