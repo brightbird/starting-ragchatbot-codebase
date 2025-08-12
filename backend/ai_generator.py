@@ -63,11 +63,10 @@ Provide only the direct answer to what was asked.
         """
         
         # Build system content efficiently - avoid string ops when possible
-        system_content = (
-            f"{self.SYSTEM_PROMPT}\n\nPrevious conversation:\n{conversation_history}"
-            if conversation_history 
-            else self.SYSTEM_PROMPT
-        )
+        if conversation_history:
+            system_content = f"{self.SYSTEM_PROMPT}\n\nPrevious conversation:\n{conversation_history}"
+        else:
+            system_content = self.SYSTEM_PROMPT
         
         # Prepare initial messages
         messages = [
@@ -151,10 +150,11 @@ Provide only the direct answer to what was asked.
                     tool_results = []
                     for tool_call in choice.message.tool_calls:
                         try:
+                            import json
                             # Execute tool with provided arguments
                             tool_result = tool_manager.execute_tool(
                                 tool_call.function.name, 
-                                **eval(tool_call.function.arguments)  # Convert string arguments to dict
+                                **json.loads(tool_call.function.arguments)  # Convert string arguments to dict
                             )
                             
                             tool_results.append({

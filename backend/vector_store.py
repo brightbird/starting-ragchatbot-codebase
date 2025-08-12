@@ -117,20 +117,17 @@ class VectorStore:
     
     def _build_filter(self, course_title: Optional[str], lesson_number: Optional[int]) -> Optional[Dict]:
         """Build ChromaDB filter from search parameters"""
-        if not course_title and lesson_number is None:
-            return None
-            
-        # Handle different filter combinations
-        if course_title and lesson_number is not None:
-            return {"$and": [
-                {"course_title": course_title},
-                {"lesson_number": lesson_number}
-            ]}
+        # Build filter conditions only for non-None parameters
+        conditions = {}
         
         if course_title:
-            return {"course_title": course_title}
+            conditions["course_title"] = course_title
             
-        return {"lesson_number": lesson_number}
+        if lesson_number is not None:
+            conditions["lesson_number"] = lesson_number
+            
+        # Return None if no conditions, otherwise return the conditions dict
+        return conditions if conditions else None
     
     def add_course_metadata(self, course: Course):
         """Add course information to the catalog for semantic search"""

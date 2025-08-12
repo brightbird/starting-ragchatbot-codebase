@@ -24,7 +24,7 @@ app.add_middleware(
 # Enable CORS with proper settings for proxy
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -85,6 +85,15 @@ async def get_course_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/clear_session")
+async def clear_session(session_id: str):
+    """Clear a conversation session"""
+    try:
+        rag_system.session_manager.clear_session(session_id)
+        return {"message": "Session cleared successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.on_event("startup")
 async def startup_event():
     """Load initial documents on startup"""
@@ -98,7 +107,6 @@ async def startup_event():
             print(f"Error loading documents: {e}")
 
 # Custom static file handler with no-cache headers for development
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 from pathlib import Path

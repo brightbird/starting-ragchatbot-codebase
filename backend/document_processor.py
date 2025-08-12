@@ -64,23 +64,15 @@ class DocumentProcessor:
                 chunks.append(' '.join(current_chunk))
                 
                 # Calculate overlap for next chunk
-                if hasattr(self, 'chunk_overlap') and self.chunk_overlap > 0:
-                    # Find how many sentences to overlap
-                    overlap_size = 0
-                    overlap_sentences = 0
-                    
-                    # Count backwards from end of current chunk
-                    for k in range(len(current_chunk) - 1, -1, -1):
-                        sentence_len = len(current_chunk[k]) + (1 if k < len(current_chunk) - 1 else 0)
-                        if overlap_size + sentence_len <= self.chunk_overlap:
-                            overlap_size += sentence_len
-                            overlap_sentences += 1
-                        else:
-                            break
-                    
-                    # Move start position considering overlap
-                    next_start = i + len(current_chunk) - overlap_sentences
-                    i = max(next_start, i + 1)  # Ensure we make progress
+                if self.chunk_overlap > 0:
+                    # Simple overlap: move back by a fixed number of sentences
+                    # This creates a more predictable overlap pattern
+                    sentences_in_chunk = len(current_chunk)
+                    overlap_sentences = min(
+                        max(1, self.chunk_overlap // 50),  # Roughly 50 chars per sentence
+                        sentences_in_chunk - 1  # Don't overlap the entire chunk
+                    )
+                    i = i + len(current_chunk) - overlap_sentences
                 else:
                     # No overlap - move to next sentence after current chunk
                     i += len(current_chunk)

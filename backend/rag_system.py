@@ -4,7 +4,7 @@ from document_processor import DocumentProcessor
 from vector_store import VectorStore
 from ai_generator import AIGenerator
 from session_manager import SessionManager
-from search_tools import ToolManager, CourseSearchTool
+from search_tools import ToolManager, CourseSearchTool, CourseOutlineTool
 from models import Course, Lesson, CourseChunk
 
 class RAGSystem:
@@ -16,13 +16,15 @@ class RAGSystem:
         # Initialize core components
         self.document_processor = DocumentProcessor(config.CHUNK_SIZE, config.CHUNK_OVERLAP)
         self.vector_store = VectorStore(config.CHROMA_PATH, config.EMBEDDING_MODEL, config.MAX_RESULTS)
-        self.ai_generator = AIGenerator(config.ANTHROPIC_API_KEY, config.ANTHROPIC_MODEL)
+        self.ai_generator = AIGenerator(config.MODELSCOPE_API_KEY, config.MODELSCOPE_MODEL)
         self.session_manager = SessionManager(config.MAX_HISTORY)
         
         # Initialize search tools
         self.tool_manager = ToolManager()
         self.search_tool = CourseSearchTool(self.vector_store)
+        self.outline_tool = CourseOutlineTool(self.vector_store)
         self.tool_manager.register_tool(self.search_tool)
+        self.tool_manager.register_tool(self.outline_tool)
     
     def add_course_document(self, file_path: str) -> Tuple[Course, int]:
         """
@@ -46,7 +48,9 @@ class RAGSystem:
             
             return course, len(course_chunks)
         except Exception as e:
+            import traceback
             print(f"Error processing course document {file_path}: {e}")
+            print(f"Traceback: {traceback.format_exc()}")
             return None, 0
     
     def add_course_folder(self, folder_path: str, clear_existing: bool = False) -> Tuple[int, int]:
@@ -95,7 +99,9 @@ class RAGSystem:
                     elif course:
                         print(f"Course already exists: {course.title} - skipping")
                 except Exception as e:
+                    import traceback
                     print(f"Error processing {file_name}: {e}")
+                    print(f"Traceback: {traceback.format_exc()}")
         
         return total_courses, total_chunks
     
