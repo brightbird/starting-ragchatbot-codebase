@@ -8,9 +8,9 @@ load_dotenv()
 @dataclass
 class Config:
     """Configuration settings for the RAG system"""
-    # Anthropic API settings
-    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    # ModelScope API settings
+    MODELSCOPE_API_KEY: str = os.getenv("MODELSCOPE_API_KEY", "")
+    MODELSCOPE_MODEL: str = "Qwen/Qwen3-Coder-480B-A35B-Instruct"
     
     # Embedding model settings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
